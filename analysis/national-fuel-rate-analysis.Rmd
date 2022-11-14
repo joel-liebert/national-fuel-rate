@@ -1,0 +1,11 @@
+---
+title: "national-fuel-rate"
+author: "Joel Liebert"
+date: "2022-11-08"
+output: html_document
+---
+First step: create boxplot of effective fuel rates (maybe divided by effective miles to get RPM?) (maybe just overall market?) and measure against low, mid, and high estimated fuel rates
+```{r}
+
+```
+
