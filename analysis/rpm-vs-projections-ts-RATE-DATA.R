@@ -8,17 +8,18 @@ library(tidyr)
 library(zoo)
 library(lubridate)
 
+setwd("C:/Users/jliebert/Documents/projects/national-fuel-rate/analysis")
 source('./utils.R')
 
 #---- load data ----
-doe_FW <- response_pull(data_to_forecast='DOE', type='ticker', start_date='2018-10-27')
+doe_FW_rd <- response_pull(data_to_forecast='DOE', type='ticker', start_date='2018-10-27')
 
 bqcon <- dbConnect(
   bigrquery::bigquery(),
   project = "freightwaves-data-factory"
 )
 
-query_main = 
+query_main_rd = 
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
@@ -39,7 +40,7 @@ query_main =
     select * from final
     order by data_timestamp, mode"
 
-query_PADD = 
+query_PADD_rd = 
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
@@ -77,7 +78,7 @@ query_PADD =
     select * from final
     order by data_timestamp, PADD_type"
 
-query_region = 
+query_region_rd = 
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
@@ -129,7 +130,7 @@ query_region =
     select * from final
     order by data_timestamp, lane_region"
 
-query_LOH = 
+query_LOH_rd = 
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
@@ -169,16 +170,16 @@ query_LOH =
     select * from final
     order by data_timestamp, LOH_type"
 
-main_df   <- dbGetQuery(bqcon, query_main)
-PADD_df   <- dbGetQuery(bqcon, query_PADD)
-region_df <- dbGetQuery(bqcon, query_region)
-LOH_df    <- dbGetQuery(bqcon, query_LOH)
+main_df_rd   <- dbGetQuery(bqcon, query_main_rd)
+PADD_df_rd   <- dbGetQuery(bqcon, query_PADD_rd)
+region_df_rd <- dbGetQuery(bqcon, query_region_rd)
+LOH_df_rd    <- dbGetQuery(bqcon, query_LOH_rd)
 
 #---- create low, mid, and high projections ----
 fc  <- list(low_fc=1,  mid_fc=1.5, high_fc=2)
 mpg <- list(low_mpg=5, mid_mpg=6,  high_mpg=7)
 
-doe_FW_ranges <- doe_FW %>% 
+doe_FW_ranges_rd <- doe_FW %>% 
   mutate(doe_avg  = zoo::rollmean(y, 10, fill=NA, align='left'),
          low_fsc  = (doe_avg - fc$high_fc)/mpg$high_mpg,
          mid_fsc  = (doe_avg - fc$mid_fc) /mpg$mid_mpg,
@@ -188,52 +189,62 @@ doe_FW_ranges <- doe_FW %>%
   tidyr::pivot_longer(cols=c('low_fsc', 'mid_fsc', 'high_fsc'), names_to='rate', values_to='value')
 
 #---- combine data ----
-combined_main_df   <- doe_FW_ranges %>% 
-  left_join(main_df,   by=c('ds'='data_timestamp')) %>% 
-  # right_join(todd_df,  by=c('ds'='DATE')) %>% 
+combined_main_df_rd   <- doe_FW_ranges_rd %>% 
+  left_join(main_df_rd,   by=c('ds'='data_timestamp')) %>% 
+  rename(mode_type = mode) %>%
   mutate(todd_FSC = (y-1.2)/6,
          HEB_FSC = ceiling( ((y-1.22)/6) *100 )/100,
          HBC_FSC = ceiling( ((y-1.15)/5) *100 )/100,
          Genpak_FSC = ceiling( ((y-1.11)/6) *100 )/100)
 
-combined_PADD_df   <- doe_FW_ranges %>% 
-  left_join(PADD_df,   by=c('ds'='data_timestamp'))
+combined_PADD_df_rd   <- doe_FW_ranges_rd %>% 
+  left_join(PADD_df_rd,   by=c('ds'='data_timestamp'))
 
-combined_region_df <- doe_FW_ranges %>% 
-  left_join(region_df, by=c('ds'='data_timestamp'))
+combined_region_df_rd <- doe_FW_ranges_rd %>% 
+  left_join(region_df_rd, by=c('ds'='data_timestamp'))
 
-combined_LOH_df    <- doe_FW_ranges %>% 
-  left_join(LOH_df,    by=c('ds'='data_timestamp'))
+combined_LOH_df_rd    <- doe_FW_ranges_rd %>% 
+  left_join(LOH_df_rd,    by=c('ds'='data_timestamp')) %>% 
+  mutate(LOH_type = factor(LOH_type, levels=c('city','short','mid','tweener','long','extra-long')))
 #---- plot data ----
-fuel_rate_plotter <- function(data, rate_type) {
+fuel_rate_plotter_rd <- function(data, rate_type) {
 
   plot <- data %>%
     ggplot(aes(ds, value, fill=rate)) +
     geom_line() +
     theme_classic() +
     labs(x='', y='Fuel RPM') +
-    ggtitle(paste0(rate_type, ' Fuel Rates vs Projected Range (based on ten-week rolling average of DOE.USA)'))
+    ggtitle(paste0(rate_type, ' Fuel Rates vs Projected Range (FW calculated rate data)'))
 
   return(plot)
 
 }
 
-main_plot <- combined_main_df %>%
-  fuel_rate_plotter('Mode') +
-  geom_line(aes(ds, fuel_rpm, color=mode))
-main_plot
+main_plot_rd <- combined_main_df_rd %>%
+  fuel_rate_plotter_rd('Mode') +
+  geom_line(aes(ds, fuel_rpm, color=mode_type))
+main_plot_rd
 
-PADD_plot <- combined_PADD_df %>% 
-  fuel_rate_plotter('PADD') +
+PADD_plot_rd <- combined_PADD_df_rd %>% 
+  fuel_rate_plotter_rd('PADD') +
   geom_line(aes(ds, fuel_rpm, color=PADD_type))
-PADD_plot
+PADD_plot_rd
 
-region_plot <- combined_region_df %>% 
-  fuel_rate_plotter('Region') +
+# Old code used to look at PADD rates broken out by mode_type. Requires a different query that includes mode_type.
+# combined_PADD_df_rd %>% 
+#   ggplot() +
+#   geom_hline(yintercept=doe_fsc_ranges_avg) +
+#   theme_classic() +
+#   geom_boxplot(aes(mode_type, fuel_rpm)) +
+#   facet_wrap('PADD_type') +
+#   labs(x='', y='Fuel RPM', title='PADD Fuel Rates vs Projected Range (2019 - present, FW calculated rate data)')
+
+region_plot_rd <- combined_region_df_rd %>% 
+  fuel_rate_plotter_rd('Region') +
   geom_line(aes(ds, fuel_rpm, color=lane_region))
-region_plot
+region_plot_rd
 
-LOH_plot <- combined_LOH_df %>% 
-  fuel_rate_plotter('LOH') +
+LOH_plot_rd <- combined_LOH_df_rd %>% 
+  fuel_rate_plotter_rd('LOH') +
   geom_line(aes(ds, fuel_rpm, color=LOH_type))
-LOH_plot
+LOH_plot_rd
