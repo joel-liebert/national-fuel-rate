@@ -9,7 +9,6 @@ library(zoo)
 library(lubridate)
 library(conflicted)
 
-setwd("C:/Users/jliebert/Documents/projects/national-fuel-rate/analysis")
 source('./utils.R')
 
 #---- load data ----
@@ -43,7 +42,7 @@ query_mode =
     ranks as (
       select
         *
-        ,max(date) over (partition by week) +2 as data_timestamp
+        ,max(date) over (partition by week) + 2 as data_timestamp
         ,percent_rank() over (order by fuel_rpm) as rpm_rank
       from filtered
       where fuel_rpm is not null
@@ -361,7 +360,7 @@ boxplotter_template <- function(data, rate_type) {
     ggplot() +
     geom_hline(yintercept=doe_fsc_ranges_avg) +
     theme_classic() +
-    ggtitle(paste0(rate_type, ' Fuel Rates vs Average Projected Range (2019 - present)')) +
+    ggtitle(paste0(rate_type, ' Fuel Rates vs Average Projected Range (2019 - present, enriched beetlejuice load data)')) +
     labs(x=' ', y='Fuel RPM')
   
   return(plot)
@@ -374,7 +373,7 @@ mode_boxplot <- boxplotter_template(combined_mode_df, 'Mode') +
   geom_boxplot(aes(mode_type, fuel_rpm))
 
 mode_plot
-mode_boxplot + ggtitle('Mode Fuel Rate vs Average Projected Range (2019 - present, enriched beetlejuice load data)')
+mode_boxplot
 
 # PADD
 PADD_plot <- plotter_template(combined_PADD_df, 'PADD') +
@@ -393,13 +392,14 @@ PADD_boxplot_mode
 region_plot <- plotter_template(combined_region_df, 'Region') +
   geom_line(aes(ds, fuel_rpm, color=lane_region))
 region_boxplot <- boxplotter_template(combined_region_df, 'Region') +
-  geom_boxplot(aes(lane_region, fuel_rpm))
+  geom_boxplot(aes(lane_region, fuel_rpm)) +
+  theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
 # region_boxplot_mode <- boxplotter_template(combined_region_df, 'Region') +
 #   geom_boxplot(aes(mode_type, fuel_rpm)) +
 #   facet_wrap('lane_region')
 
 region_plot
-region_boxplot + theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust=1))
+region_boxplot
 region_boxplot_mode
 
 # LOH

@@ -8,7 +8,6 @@ library(tidyr)
 library(zoo)
 library(lubridate)
 
-setwd("C:/Users/jliebert/Documents/projects/national-fuel-rate/analysis")
 source('./utils.R')
 
 #---- load data ----
@@ -23,22 +22,27 @@ query_main_rd =
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
-        ,mode
-        ,sum(effective_miles) as effective_miles_sum
-        ,sum(effective_fuel_charge) as effective_fuel_charge_sum
+        ,mode as mode_type
+        ,round( safe_divide(effective_fuel_charge, miles), 2 ) as fuel_rpm
       from `freightwaves-data-factory.output_trucking_rates.contract_output_history`
       where data_timestamp > '2018-10-27'
-      group by data_timestamp, mode
+    ),
+    median as (
+      select
+        data_timestamp, mode_type
+        ,percentile_cont(fuel_rpm, 0.5) over(partition by data_timestamp, mode_type) as fuel_rpm
+      from sums
     ),
     final as (
       select
-        data_timestamp, mode
-        ,round( safe_divide(effective_fuel_charge_sum, effective_miles_sum), 2 ) as fuel_rpm
-      from sums
+        data_timestamp, mode_type
+        ,max(fuel_rpm) as fuel_rpm
+      from median
+      group by data_timestamp, mode_type
     )
     
     select * from final
-    order by data_timestamp, mode"
+    order by data_timestamp, mode_type"
 
 query_PADD_rd = 
   "with sums as (
@@ -46,7 +50,7 @@ query_PADD_rd =
         data_timestamp + 1 as data_timestamp
         ,cast( substr(od_pair, 1, 3) as int64 ) as origin_zip3
         ,cast( substr(od_pair, 5, 3) as int64 ) as dest_zip3
-        ,round( safe_divide(effective_fuel_charge, effective_miles), 2 ) as fuel_rpm
+        ,round( safe_divide(effective_fuel_charge, miles), 2 ) as fuel_rpm
       from `freightwaves-data-factory.output_trucking_rates.contract_output_history`
       where data_timestamp > '2018-10-27'
     ),
@@ -84,7 +88,7 @@ query_region_rd =
         data_timestamp + 1 as data_timestamp
         ,substr(od_pair, 1, 1) as origin_zip3
         ,substr(od_pair, 5, 1) as dest_zip3
-        ,round( safe_divide(effective_fuel_charge, effective_miles), 2 ) as fuel_rpm
+        ,round( safe_divide(effective_fuel_charge, miles), 2 ) as fuel_rpm
       from `freightwaves-data-factory.output_trucking_rates.contract_output_history`
       where data_timestamp > '2018-10-27'
     ),
@@ -134,8 +138,8 @@ query_LOH_rd =
   "with sums as (
       select
         data_timestamp + 1 as data_timestamp
-        ,effective_miles
-        ,round( safe_divide(effective_fuel_charge, effective_miles), 2 ) as fuel_rpm
+        ,miles
+        ,round( safe_divide(effective_fuel_charge, miles), 2 ) as fuel_rpm
       from `freightwaves-data-factory.output_trucking_rates.contract_output_history`
       where data_timestamp > '2018-10-27'
     ),
@@ -143,11 +147,11 @@ query_LOH_rd =
       select
         data_timestamp
         ,case 
-          when effective_miles < 100 then 'city'
-          when effective_miles < 250 then 'short'
-          when effective_miles < 500 then 'mid'
-          when effective_miles < 750 then 'tweener'
-          when effective_miles < 1000 then 'long'
+          when miles <  100 then 'city'
+          when miles <  250 then 'short'
+          when miles <  500 then 'mid'
+          when miles <  750 then 'tweener'
+          when miles < 1000 then 'long'
           else 'extra-long'
           end as LOH_type
         ,fuel_rpm
@@ -179,7 +183,7 @@ LOH_df_rd    <- dbGetQuery(bqcon, query_LOH_rd)
 fc  <- list(low_fc=1,  mid_fc=1.5, high_fc=2)
 mpg <- list(low_mpg=5, mid_mpg=6,  high_mpg=7)
 
-doe_FW_ranges_rd <- doe_FW %>% 
+doe_FW_ranges_rd <- doe_FW_rd %>% 
   mutate(doe_avg  = zoo::rollmean(y, 10, fill=NA, align='left'),
          low_fsc  = (doe_avg - fc$high_fc)/mpg$high_mpg,
          mid_fsc  = (doe_avg - fc$mid_fc) /mpg$mid_mpg,
@@ -190,8 +194,8 @@ doe_FW_ranges_rd <- doe_FW %>%
 
 #---- combine data ----
 combined_main_df_rd   <- doe_FW_ranges_rd %>% 
-  left_join(main_df_rd,   by=c('ds'='data_timestamp')) %>% 
-  rename(mode_type = mode) %>%
+  left_join(main_df_rd,   by=c('ds'='data_timestamp')) %>%
+  # add reference surcharge schedules
   mutate(todd_FSC = (y-1.2)/6,
          HEB_FSC = ceiling( ((y-1.22)/6) *100 )/100,
          HBC_FSC = ceiling( ((y-1.15)/5) *100 )/100,
@@ -208,7 +212,6 @@ combined_LOH_df_rd    <- doe_FW_ranges_rd %>%
   mutate(LOH_type = factor(LOH_type, levels=c('city','short','mid','tweener','long','extra-long')))
 #---- plot data ----
 fuel_rate_plotter_rd <- function(data, rate_type) {
-
   plot <- data %>%
     ggplot(aes(ds, value, fill=rate)) +
     geom_line() +
@@ -217,7 +220,6 @@ fuel_rate_plotter_rd <- function(data, rate_type) {
     ggtitle(paste0(rate_type, ' Fuel Rates vs Projected Range (FW calculated rate data)'))
 
   return(plot)
-
 }
 
 main_plot_rd <- combined_main_df_rd %>%
@@ -230,15 +232,6 @@ PADD_plot_rd <- combined_PADD_df_rd %>%
   geom_line(aes(ds, fuel_rpm, color=PADD_type))
 PADD_plot_rd
 
-# Old code used to look at PADD rates broken out by mode_type. Requires a different query that includes mode_type.
-# combined_PADD_df_rd %>% 
-#   ggplot() +
-#   geom_hline(yintercept=doe_fsc_ranges_avg) +
-#   theme_classic() +
-#   geom_boxplot(aes(mode_type, fuel_rpm)) +
-#   facet_wrap('PADD_type') +
-#   labs(x='', y='Fuel RPM', title='PADD Fuel Rates vs Projected Range (2019 - present, FW calculated rate data)')
-
 region_plot_rd <- combined_region_df_rd %>% 
   fuel_rate_plotter_rd('Region') +
   geom_line(aes(ds, fuel_rpm, color=lane_region))
@@ -248,3 +241,14 @@ LOH_plot_rd <- combined_LOH_df_rd %>%
   fuel_rate_plotter_rd('LOH') +
   geom_line(aes(ds, fuel_rpm, color=LOH_type))
 LOH_plot_rd
+
+#---- boxplots ----
+# Old code used to look at PADD rates broken out by mode_type.
+# Implementing this requires a different query that includes mode_type.
+# combined_PADD_df_rd %>% 
+#   ggplot() +
+#   geom_hline(yintercept=doe_fsc_ranges_avg) +
+#   theme_classic() +
+#   geom_boxplot(aes(mode_type, fuel_rpm)) +
+#   facet_wrap('PADD_type') +
+#   labs(x='', y='Fuel RPM', title='PADD Fuel Rates vs Projected Range (2019 - present, FW calculated rate data)')
