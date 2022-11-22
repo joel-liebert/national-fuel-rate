@@ -386,7 +386,7 @@ PADD_boxplot <- boxplotter_template(combined_PADD_df, 'PADD') +
 
 PADD_plot
 PADD_boxplot
-PADD_boxplot_mode
+# PADD_boxplot_mode
 
 # Region
 region_plot <- plotter_template(combined_region_df, 'Region') +
@@ -400,7 +400,7 @@ region_boxplot <- boxplotter_template(combined_region_df, 'Region') +
 
 region_plot
 region_boxplot
-region_boxplot_mode
+# region_boxplot_mode
 
 # LOH
 LOH_plot <- plotter_template(combined_LOH_df, 'LOH') +
@@ -413,4 +413,4 @@ LOH_boxplot <- boxplotter_template(combined_LOH_df, 'LOH') +
 
 LOH_plot
 LOH_boxplot
-LOH_boxplot_mode
+# LOH_boxplot_mode
